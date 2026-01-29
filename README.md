@@ -28,6 +28,7 @@ Before using Metica Analytics, you need:
 
 1. **API Key** – obtained from the [Metica platform](https://metica.com)
 2. **App ID** – obtained from the Metica platform
+3. A **Max SDK Key**, obtainable from Applovin platfom
 
 ## Installation
 
@@ -57,9 +58,10 @@ Analytics requires the Metica SDK to be initialized first:
 using Metica;
 
 var config = new MeticaInitConfig("YOUR_API_KEY", "YOUR_APP_ID", "YOUR_USER_ID");
+var mediationInfo = new MeticaMediationInfo(MeticaMediationType.MAX, "YOUR_MAX_SDK_KEY");
 
 // Initialize SDK
-var initResponse = await MeticaSdk.InitializeAsync(config);
+var initResponse = await MeticaSdk.InitializeAsync(config, mediationInfo);
 ```
 
 > **Note:** The `YOUR_USER_ID` parameter is optional. If omitted, the SDK generates a unique UUID automatically.
@@ -82,6 +84,7 @@ var analytics = MeticaSdk.Analytics;
 
 - **Maximum properties:** `customPayload` and user attributes can contain up to **100 properties**
 - **Array size limit:** Arrays can contain up to **100 elements** of the same primitive type
+- **Nested object:** Nested objects are no permitted
 
 ### Allowed Data Types
 
