@@ -28,7 +28,7 @@ Before using Metica Analytics, you need:
 
 1. **API Key** – obtained from the [Metica platform](https://metica.com)
 2. **App ID** – obtained from the Metica platform
-3. A **Max SDK Key**, obtainable from Applovin platfom
+3. A **Max SDK Key**, obtainable from Applovin platfom (only required when initializing the SDK with ads)
 
 ## Installation
 
@@ -52,7 +52,11 @@ The Analytics feature requires an additional package to be installed:
 
 ## Initialization
 
-Analytics requires the Metica SDK to be initialized first:
+Analytics requires the Metica SDK to be initialized first. The SDK supports two initialization flows that share the same `MeticaInitConfig`.
+
+### Standard initialization
+
+A single call to `MeticaSdk.InitializeAsync` (or `MeticaSdk.Initialize`) with mediation info initializes both Ads and Analytics together. If your game does not need to track analytics events before the ads SDK is ready, this is all you need:
 
 ```csharp
 using Metica;
@@ -60,9 +64,33 @@ using Metica;
 var config = new MeticaInitConfig("YOUR_API_KEY", "YOUR_APP_ID", "YOUR_USER_ID");
 var mediationInfo = new MeticaMediationInfo(MeticaMediationType.MAX, "YOUR_MAX_SDK_KEY");
 
-// Initialize SDK
+// Initializes both Ads and Analytics
 var initResponse = await MeticaSdk.InitializeAsync(config, mediationInfo);
 ```
+
+### Two-stage initialization (early analytics)
+
+In consent-first integrations, the standard call must be deferred until after the user accepts the privacy policy. During that window, early-session events such as `install` and `sessionStart` would otherwise be lost — the SDK's internal event queue only activates after init, so any event fired before then produces a runtime error.
+
+To avoid this, you can pre-initialize Analytics with `MeticaSdk.InitializeAnalytics(config)` as soon as the app starts. The internal event queue activates immediately, so early events are buffered and delivered once the SDK is ready. Later, when ads are needed (e.g. after consent), call `MeticaSdk.InitializeAsync` (or `MeticaSdk.Initialize`) with mediation info to add Ads on top of the already-initialized Analytics:
+
+```csharp
+using Metica;
+
+// Step 1 — at app start: Analytics-only, synchronous
+var config = new MeticaInitConfig("YOUR_API_KEY", "YOUR_APP_ID", "YOUR_USER_ID");
+MeticaSdk.InitializeAnalytics(config);
+
+// ... fire early-session analytics events here (install, sessionStart, ...) ...
+
+// Step 2 — after consent / when ads are needed: add Ads on top of Analytics
+var mediationInfo = new MeticaMediationInfo(MeticaMediationType.MAX, "YOUR_MAX_SDK_KEY");
+var initResponse = await MeticaSdk.InitializeAsync(config, mediationInfo);
+```
+
+`MeticaSdk.InitializeAnalytics` is **optional** — if your integration does not need early analytics, the standard one-call flow continues to work exactly as before.
+
+> **Caveat:** when both calls are used, they should pass the same `MeticaInitConfig` (`ApiKey`, `AppId`, `UserId`). If the second call supplies a different config, the native SDK keeps the configuration from the first call and logs a warning — the differing values are ignored.
 
 > **Note:** The `YOUR_USER_ID` parameter is optional. If omitted, the SDK generates a unique UUID automatically.
 
