@@ -70,9 +70,9 @@ var initResponse = await MeticaSdk.InitializeAsync(config, mediationInfo);
 
 ### Two-stage initialization (early analytics)
 
-In consent-first integrations, the standard call must be deferred until after the user accepts the privacy policy. During that window, early-session events such as `install` and `sessionStart` would otherwise be lost — the SDK's internal event queue only activates after init, so any event fired before then produces a runtime error.
+Some integrations need Analytics to be available earlier in the app lifecycle than the rest of the SDK — the standard initialization call is often deferred until later in the boot flow (waiting on user consent, on a loading or splash screen, on remote configuration, or simply to defer ads bring-up until the game is ready). While that call is pending, early-session events such as `install` and `sessionStart` would otherwise be lost, because the SDK's internal event queue only activates after init.
 
-To avoid this, you can pre-initialize Analytics with `MeticaSdk.InitializeAnalytics(config)` as soon as the app starts. The internal event queue activates immediately, so early events are buffered and delivered once the SDK is ready. Later, when ads are needed (e.g. after consent), call `MeticaSdk.InitializeAsync` (or `MeticaSdk.Initialize`) with mediation info to add Ads on top of the already-initialized Analytics:
+To avoid this, you can pre-initialize Analytics with `MeticaSdk.InitializeAnalytics(config)` as soon as the app starts. The internal event queue activates immediately, so early events are buffered and delivered once the SDK is ready. Later, when ads are needed, call `MeticaSdk.InitializeAsync` (or `MeticaSdk.Initialize`) with mediation info to add Ads on top of the already-initialized Analytics:
 
 ```csharp
 using Metica;
