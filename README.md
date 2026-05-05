@@ -106,6 +106,35 @@ using Metica.Analytics.Abstractions;
 var analytics = MeticaSdk.Analytics;
 ```
 
+## Environment Attributes
+
+In addition to the properties you supply per event, the SDK automatically attaches a set of **environment attributes** describing the device, app, and session. These are collected by the native layer and included with every analytics event — you do not need to send them explicitly.
+
+The table below lists each attribute, its type, and the platforms on which it is populated:
+
+| Attribute            | Type     | Android | iOS | Description                                                              |
+|----------------------|----------|:-------:|:---:|--------------------------------------------------------------------------|
+| `appVersion`         | string   | ✅      | ✅  | Host app's version (e.g. `1.4.2`).                                       |
+| `meticaUnitySdk`     | string   | ✅      | ✅  | Version of the Metica SDK in use.                                        |
+| `platform`           | string   | ✅      | ✅  | `android` or `ios`.                                                      |
+| `osVersion`          | string   | ✅      | ✅  | Operating system version (e.g. `14`, `17.4`).                            |
+| `buildNumber`        | string   | ✅      | ✅  | OS build identifier (Android `Build.ID`, iOS build number).              |
+| `deviceModel`        | string   | ✅      | ✅  | Device model identifier (e.g. `Pixel 7`, `iPhone15,2`).                  |
+| `deviceManufacturer` | string?  | ✅      | —   | Hardware manufacturer (e.g. `Google`, `Samsung`). Android only.          |
+| `deviceType`         | string   | ✅      | ✅  | `phone` or `tablet`.                                                     |
+| `deviceMemory`       | long     | ✅      | ✅  | Total device RAM in bytes.                                               |
+| `locale`             | string   | ✅      | ✅  | BCP-47 language tag (e.g. `en-US`).                                      |
+| `localTimezone`      | string   | ✅      | ✅  | IANA time zone identifier (e.g. `Europe/London`).                        |
+| `country`            | string?  | ✅      | ✅  | ISO 3166-1 alpha-2 country code, lowercased.                             |
+| `storeCountry`       | string?  | ✅      | ✅  | App store storefront country (when available).                           |
+| `sessionCount`       | long     | ✅      | ✅  | Number of sessions started by this user on this device.                  |
+| `lastSessionLength`  | long     | ✅      | ✅  | Duration of the previous session, in milliseconds.                       |
+| `gaid`               | string?  | ✅      | —   | Google Advertising ID (lowercased). Android only; null when unavailable. |
+| `idfa`               | string?  | —       | ✅  | Apple Identifier For Advertisers. iOS only; null when unauthorized.      |
+| `idfv`               | string?  | —       | ✅  | Apple Identifier For Vendor. iOS only.                                   |
+
+> Attributes marked nullable (`?`) may be absent in the payload when the platform cannot resolve them (e.g. `gaid`/`idfa` when the user has not granted tracking consent).
+
 ## Data Constraints
 
 ### Property Limits
@@ -270,4 +299,114 @@ analytics.LogPartialStateUpdateEvent(
     }
 );
 ```
+
+## Building a Custom Analytics Wrapper
+
+Studios that ship many titles — often grouped by genre (puzzle, simulation, arcade, …) — frequently want a **shared, internal analytics library** that standardises how each game describes its world while still routing events through Metica. The Metica SDK is designed to support this pattern through the **`Metica.Analytics.Abstractions`** package.
+
+### Architecture
+
+The integration is split across two layers:
+
+| Layer                              | Owner       | Changes Often? | Purpose                                                                                  |
+|------------------------------------|-------------|----------------|------------------------------------------------------------------------------------------|
+| `Metica.Analytics.Abstractions`    | Metica      | Rarely         | Tiny, stable contract — `IMeticaAnalytics` interface + minimal DTOs.                     |
+| Metica Unity SDK                   | Metica      | Often          | Full implementation — transport, retries, device info, ad mediation, etc.                |
+| Your custom wrapper library        | Your studio | As needed      | Genre/title-specific helpers that map gameplay state to event payloads.                  |
+
+Your custom library depends only on `Metica.Analytics.Abstractions`, **not** on the full Unity SDK. As long as the interface stays backward-compatible (which it is designed to), SDK upgrades do not require you to rebuild or change your wrapper code.
+
+### The stable contract
+
+Your wrapper code targets the `IMeticaAnalytics` interface exposed by the abstractions package:
+
+```csharp
+namespace Metica.Analytics.Abstractions
+{
+    public interface IMeticaAnalytics
+    {
+        void LogPurchaseEvent(
+            string productId, string currency, double amount, string status,
+            string? errorCode, string? referenceId,
+            Dictionary<string, object>? customPayload);
+
+        void LogSessionStartEvent(Dictionary<string, object>? customPayload);
+        void LogInstallEvent(Dictionary<string, object>? customPayload);
+
+        void LogImpressionEvent(
+            double value, string type, string mediator, string source,
+            string? placement, Dictionary<string, object>? customPayload);
+
+        void LogFullStateUpdateEvent(Dictionary<string, object> attributes);
+        void LogPartialStateUpdateEvent(Dictionary<string, object> attributes);
+
+        void LogCustomEvent(string eventName, Dictionary<string, object>? properties);
+    }
+}
+```
+
+`MeticaSdk.Analytics` (returned after initialization) implements this interface — your wrapper accepts an `IMeticaAnalytics` in its constructor and never references the concrete SDK.
+
+### Example: a genre-specific wrapper
+
+A puzzle-genre wrapper might encapsulate the player context once and produce strongly-typed event helpers:
+
+```csharp
+using System.Collections.Generic;
+using Metica.Analytics.Abstractions;
+
+public class PuzzlePlayerContext
+{
+    public int PlayerLevel { get; set; }
+    public int CurrentLevelIndex { get; set; }
+    public int StarsEarned { get; set; }
+    public int RemainingMoves { get; set; }
+    public string ExperimentCohort { get; set; }
+}
+
+public class PuzzleAnalytics
+{
+    private readonly IMeticaAnalytics _analytics;
+
+    public PuzzleAnalytics(IMeticaAnalytics analytics)
+    {
+        _analytics = analytics;
+    }
+
+    public void LogLevelEndOfferImpression(string offerId, PuzzlePlayerContext ctx)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["genre"]          = "puzzle",
+            ["offerId"]        = offerId,
+            ["levelIndex"]     = ctx.CurrentLevelIndex,
+            ["stars"]          = ctx.StarsEarned,
+            ["remainingMoves"] = ctx.RemainingMoves,
+            ["cohort"]         = ctx.ExperimentCohort,
+        };
+
+        _analytics.LogCustomEvent("puzzleLevelEndOfferImpression", payload);
+    }
+}
+```
+
+Wiring it up in your game:
+
+```csharp
+var config = new MeticaInitConfig("YOUR_API_KEY", "YOUR_APP_ID", "YOUR_USER_ID");
+await MeticaSdk.InitializeAsync(config, mediationInfo);
+
+var puzzle = new PuzzleAnalytics(MeticaSdk.Analytics);
+puzzle.LogLevelEndOfferImpression("offer_123", currentCtx);
+```
+
+Different genres (simulation, arcade, idle, …) follow the exact same pattern — each studio team owns its own wrapper, with its own fixed property schema, while sharing the same underlying transport.
+
+### Why this pattern
+
+- **Compatibility across SDK upgrades** — wrappers depend on the small, stable interface, so a Metica SDK release does not force a rebuild of your internal library.
+- **Schema consistency** — every game in the same genre emits the same property names and types, which keeps the [Property Type Consistency](#property-type-consistency) rule easy to satisfy across titles.
+- **Discoverability** — game developers see a strongly-typed API (`LogLevelEndOfferImpression(...)`) instead of having to remember loose dictionary keys.
+- **Testability** — wrappers can be unit-tested against a mock `IMeticaAnalytics`, with no SDK internals or native bridges involved.
+- **Clear ownership** — Metica owns the interface contract; your studio owns how gameplay state maps to event payloads.
 
